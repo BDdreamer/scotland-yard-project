@@ -201,7 +201,7 @@ public class ScoringConfig {
     public static final int MCTS_SIMULATION_DEPTH = 6;  // Increased from 3 for better lookahead against coordinated detectives
     
     /** Time budget per move in milliseconds */
-    public static final long TIME_BUDGET_MS = 800;  // Increased from 400ms for better search quality
+    public static final long TIME_BUDGET_MS = 1500;  // Increased from 800ms for more MCTS iterations
     
     // ==================== SEARCH PARAMETERS ====================
     

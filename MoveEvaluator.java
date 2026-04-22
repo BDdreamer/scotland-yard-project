@@ -868,6 +868,29 @@ public class MoveEvaluator {
                     currentRound, currentCandidates, projectedCandidates,
                     (projectedCandidates - currentCandidates) * 100.0 / currentCandidates);
             }
+            
+            // CANDIDATE SPLITTING BONUS: Reward moves that push the belief centroid
+            // far from all actual candidates, breaking role-assignment for coordinated detectives.
+            // When the centroid is between two clusters, CHASER/INTERCEPTOR go to the wrong place.
+            if (currentCandidates >= 4) {
+                double centroidX = 0, centroidY = 0;
+                int counted = 0;
+                for (int cand : candidateSet) {
+                    // Use graph distance from node 1 as a proxy for position spread
+                    int dx = graphAnalyzer.calculateShortestPath(cand, destination);
+                    if (dx >= 0) { centroidX += dx; counted++; }
+                }
+                if (counted > 0) {
+                    double avgDistFromDest = centroidX / counted;
+                    // If destination is far from the centroid of candidates, it splits the belief state
+                    if (avgDistFromDest >= 4.0) {
+                        double splitBonus = Math.min(60.0, avgDistFromDest * 10.0);
+                        score += splitBonus;
+                        if (DEBUG) debug("[SPLIT] Round %d: Candidate split bonus %.1f (avgDist=%.1f)%n",
+                            currentRound, splitBonus, avgDistFromDest);
+                    }
+                }
+            }
         }
         
         // 18.5 HUB AVOIDANCE — Detectives blocking hubs (different from encirclement)
@@ -1280,6 +1303,32 @@ public class MoveEvaluator {
         if (finalConnectivity >= 4) {
             score += finalConnectivity * 3.0; // Reward landing in well-connected areas
         }
+        
+        // NET-BREAKING BONUS: Reward DOUBLE moves that jump through a forming encirclement
+        // Check if detectives are 2-3 moves out and closing in
+        int detectivesClosing = 0;
+        for (int detLoc : detectiveLocations) {
+            int distToStart = graphAnalyzer.calculateShortestPath(startPos, detLoc);
+            if (distToStart >= 2 && distToStart <= 3) {
+                detectivesClosing++;
+            }
+        }
+        
+        if (detectivesClosing >= 2) {
+            // Check if first leg moves toward the thinnest part of the formation
+            // and second leg moves through it
+            double firstLegEncirclement = cordonDetector.calculateEncirclementRisk(firstDest, detectiveLocations);
+            double finalEncirclement = cordonDetector.calculateEncirclementRisk(finalDest, predictedDetLocs);
+            
+            // If first leg enters the net (higher encirclement) but final leg escapes (lower encirclement),
+            // this is a net-breaking move
+            if (firstLegEncirclement > 30 && finalEncirclement < firstLegEncirclement - 15) {
+                double netBreakBonus = 70.0; // Large bonus for breaking through encirclement
+                score += netBreakBonus;
+                if (DEBUG) debug("[NET-BREAK] Round %d: DOUBLE breaks encirclement (%.1f → %.1f)%n",
+                    currentRound, firstLegEncirclement, finalEncirclement);
+            }
+        }
 
         return score;
     }
@@ -1573,8 +1622,8 @@ public class MoveEvaluator {
                           Map<Ticket, Integer> simTickets) {
         Set<Integer> beliefSet = getSimulatedBeliefSet(currentMrXLocation, currentRound);
         
-        // Use 6 determinizations to capture detective possibilities
-        int samples = 6;
+        // Use 3 determinizations for faster convergence (diminishing returns past 3-4)
+        int samples = 3;
         double totalScore = 0;
         
         for (int i = 0; i < samples; i++) {
@@ -1783,15 +1832,21 @@ public class MoveEvaluator {
             
             int mobility = graphAnalyzer.getEffectiveConnectivity(adj, detLocs);
             
+            // Cordon awareness: penalise moves into encircled positions
+            int totalExits = graphAnalyzer.getConnectivity(adj);
+            int contestedExits = graphAnalyzer.getContestedExits(adj, detLocs);
+            double cordonRatio = totalExits > 0 ? (double) contestedExits / totalExits : 1.0;
+            
             // ENHANCED SCORING: Prioritize escape when in danger
             double score;
             if (inDanger) {
-                // Emergency escape: prioritize distance and mobility heavily
+                // Emergency escape: prioritize distance, mobility, and open exits
                 score = minDist * 20 + mobility * 10;
+                score -= cordonRatio * 40.0; // heavy penalty for moving into a cordon
                 
                 // Bonus for using SECRET to break tracking
                 if (chosenTicket == Ticket.SECRET) {
-                    score += 15.0;
+                    score += 30.0; // SECRET breaks detective tracking in rollouts
                 }
                 
                 // Penalty for staying in low-mobility areas when in danger
@@ -1799,11 +1854,12 @@ public class MoveEvaluator {
                     score -= 20.0;
                 }
             } else {
-                // Normal scoring
+                // Normal scoring: distance + mobility + cordon avoidance
                 score = minDist * 10 + mobility * 5;
+                score -= cordonRatio * 20.0; // moderate penalty for contested exits
                 
                 if (chosenTicket == Ticket.SECRET) {
-                    score += 5.0; // prefer using SECRET when available to maintain ambiguity
+                    score += 10.0; // prefer SECRET to maintain ambiguity
                 }
             }
             
@@ -1882,9 +1938,12 @@ public class MoveEvaluator {
         // Check capture
         if (detSet.contains(mrXPos)) return 0.0;
         
-        // CRITICAL: Check encirclement risk first
+        // SMOOTH SIGMOID: Replace hard cutoff with gradient so MCTS can differentiate
+        // "slightly surrounded" (51%) from "totally trapped" (90%+)
+        // sigmoid: 1 / (1 + e^((encirclement - 50) / 10))
+        // at 50% → 0.5, at 70% → ~0.12, at 90% → ~0.02, at 30% → ~0.88
         double encirclement = cordonDetector.calculateEncirclementRisk(mrXPos, detSet);
-        if (encirclement > 50) return 0.0;  // Trapped → loss
+        double encirclementPenalty = 1.0 / (1.0 + Math.exp((encirclement - 50.0) / 10.0));
         
         // Distance component
         int minDist = Integer.MAX_VALUE;
@@ -1903,8 +1962,9 @@ public class MoveEvaluator {
         int mobility = graphAnalyzer.getEffectiveConnectivity(mrXPos, detSet);
         double mobilityScore = Math.min(mobility / 8.0, 1.0);
         
-        // Combine (weighted average)
-        return distScore * 0.6 + mobilityScore * 0.4;
+        // Combine: weight by encirclement sigmoid so surrounded positions score lower
+        double rawScore = distScore * 0.6 + mobilityScore * 0.4;
+        return rawScore * encirclementPenalty;
     }
     
     /**
