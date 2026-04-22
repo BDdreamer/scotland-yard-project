@@ -1,84 +1,30 @@
-# scotland-yard-project
+1. Fix the MCTS Rollout Realism Gap (HIGH IMPACT)
+This is your biggest single problem. The simulateGreedyMrXMove rollout policy is far too simplistic — it only looks at distance and mobility. Meanwhile, the detectives in your rollouts use DetectiveSimulator which mirrors the real coordinated AI with roles (INTERCEPTOR, BLOCKER, ENCIRCLER, CHASER). The asymmetry means MCTS over-estimates survival because rollout-Mr.X makes dumb moves, then gets caught, biasing the tree toward positions that look safe but aren't.
+Fix: Make the rollout Mr.X policy aware of encirclement. Add cordon detection to simulateGreedyMrXMove — even a cheap contestedExits / totalExits ratio check would dramatically improve rollout accuracy. Also, the rollout currently ignores ticket-type information hiding (SECRET usage), which is Mr.X's main weapon.
+2. The evaluateTerminalPosition is Too Binary (HIGH IMPACT)
+javaif (encirclement > 50) return 0.0;  // Trapped → loss
+This hard cutoff at 50% encirclement throws away enormous amounts of gradient information. An encirclement of 51% scores identically to being literally captured. Change this to a smooth sigmoid like 1.0 / (1.0 + Math.exp((encirclement - 50) / 10.0)) so the MCTS tree can differentiate between "slightly surrounded" and "totally trapped."
+3. Introduce Lookahead-Aware Escape Corridors (STRUCTURAL)
+Your AI reacts to encirclement after it's forming. The coordinated detectives assign roles proactively (ENCIRCLER, BLOCKER). Mr.X needs a corridor planner that identifies escape routes 3–4 moves ahead and biases toward them before the net closes. Concretely:
 
- Starting Point
-Initial Mr. X AI (CombinedAI + MoveEvaluator)
+Before each move, compute the 2-step reachable set from each candidate destination
+For each reachable node, check how many detectives can reach it in ≤2 moves
+A "corridor" is a path where ≥2 consecutive nodes have low detective coverage
+Bonus moves that lead toward open corridors; penalize moves that cut off corridors
 
-Win rate vs. Coordinated Detectives: ~17%
+4. Exploit the Detectives' Coordination Weakness (STRUCTURAL)
+Reading CoordinatedDetectiveAI.scoreMove, the detectives' scoring is simplistic: W1=2.0 * covered + W2=1.0 * proximity + W3=0.5 * hubValue. The coordination penalty for overlap is only 5.0. This means:
 
-Primary failure modes: Early interception (rounds 7–12) and being surrounded after reveal rounds.
+Decoy moves work: Moving toward a cluster of candidates then using SECRET to go the opposite direction will pull INTERCEPTOR and CHASER in the wrong direction for at least 1–2 rounds
+Split the formation: The detectives assign roles based on a centroid. If Mr.X moves to positions that create a bimodal candidate distribution (two clusters far apart), the role assignment breaks down — CHASER goes to centroid (between clusters, covering neither), INTERCEPTOR goes to one cluster, leaving the other open
+Implement a "candidate splitting" bonus that rewards moves making the belief state centroid far from all actual candidates
 
-Observations: The AI was overly focused on maximizing ambiguity (candidate set size) even when under spatial pressure. It conserved high‑value tickets (SECRET/DOUBLE) too conservatively against a team that closes space quickly.
+5. Double Move Timing as Encirclement Counter (MEDIUM IMPACT)
+Your DOUBLE move evaluation penalizes early usage but doesn't specifically reward using DOUBLE to break through a forming encirclement. When detectives are 2–3 moves out and closing:
 
-🔍 Initial Diagnosis (Valid & Feasible Changes)
-A review of the codebase and failure logs identified three high‑impact, low‑effort areas for improvement:
+A well-timed DOUBLE lets Mr.X jump through the net before it closes
+Score DOUBLE moves with a "net-breaking" bonus: if the first leg moves toward the thinnest part of the detective formation and the second leg moves through it, give a large bonus
+This directly counters the ENCIRCLER role, which needs 2+ rounds to complete coverage
 
-Issue	Solution
-1. Ambiguity over‑prioritised when under pressure	Introduce a survival‑dominant blend when candidate set is small or detectives are close.
-2. Ticket conservation too strict vs. coordinated team	Apply coordinated‑mode discounts to SECRET/DOUBLE weights and relax early DOUBLE restrictions.
-3. Coordination penalties don't scale with danger	Scale formation/candidate‑dividing penalties by candidate set size (smaller set → higher penalty).
-These were implemented as a three‑change package (v2).
-
-🧪 First Benchmark After Initial Changes (v2)
-20 games (5 per seed: 100042, 200042, 300042, 400042)
-
-Overall win rate: 5% (1 win out of 20) – a regression from 17%.
-
-Capture rounds: 9–12 (still early).
-
-Capture methods: Dominated by intercepted (60–75%) and surrounded after reveal.
-
-Why the regression?
-The changes were too aggressive. The survival blend activated too easily, causing the AI to flee predictably. Ticket discounts were too steep (0.6× SECRET, 0.5× DOUBLE), leading to wasteful early usage. Penalty scaling (up to 3×) over‑penalised otherwise reasonable moves.
-
-🔧 Iterative Fine‑Tuning (v3)
-Based on the v2 results, the following adjustments were made:
-
-Parameter	v2 Value	v3 Value
-Survival blend trigger	candidateCount ≤ 15 & encirclementRisk > 25 & minDetDist ≤ 4 & effectiveExits ≤ 3	Tightened to candidateCount ≤ 12 & encirclementRisk > 40 & minDetDist ≤ 3 & effectiveExits ≤ 2
-Survival weight	0.9 / 0.7	0.8 / 0.6
-Ticket discount (SECRET)	0.6×	0.8×
-Ticket discount (DOUBLE)	0.5×	0.7×
-Penalty scaling cap	3.0×	2.0×
-Pattern‑break bonus	+15 (+20 SECRET)	+25 (+30 SECRET)
-Early DOUBLE bonuses	-60 / -40	-30 / -20
-Result (v3 benchmark):
-
-Win rate: 15% (3/20) – back to near baseline.
-
-Capture rounds: 10–15 (slightly longer survival).
-
-Candidates at reveal: 38–68 (better ambiguity maintenance).
-
-Variance: One seed hit 40%, others 0% or 20%.
-
-Assessment: The direction was correct, but performance was still brittle and seed‑dependent. The AI was surviving longer but not escaping coordinated encirclement.
-
-🎯 Further Parameter Tweaks (v4)
-To reduce variance and prevent over‑reaction, another round of fine‑tuning was applied:
-
-Parameter	v3 Value	v4 Value
-Survival blend trigger	encirclementRisk > 40	encirclementRisk > 50
-Survival weight	0.8 / 0.6	0.7 / 0.5
-Coordinated detection	hubCoverage ≥ 3 AND optimalSpacing	hubCoverage ≥ 2 OR optimalSpacing
-Early DOUBLE bonuses	-30 / -20	unchanged
-Pattern‑break bonus	+25 (+30 SECRET)	unchanged
-Result (v4 benchmark):
-
-Win rate: 15% (3/20) – no net improvement.
-
-Capture rounds: Dropped sharply for some seeds (7.2 rounds for seed 100042).
-
-Observation: Tighter survival thresholds caused the AI to delay escape until too late, leading to even earlier captures.
-
-Conclusion: Further parameter tuning alone was insufficient to break through the performance ceiling. The core issue—inability to evade coordinated spatial containment—required a structural addition.
-
-💡 Key Lessons Learned
-Heuristic weighting is sensitive. Small changes to survival/ambiguity blend can swing behaviour from recklessly aggressive to overly passive.
-
-Ticket strategy must be adaptive. Against a fast‑closing team, early DOUBLE/SECRET usage is essential, but the timing must be precise.
-
-Penalty scaling needs careful capping. Over‑penalising moves when the candidate set is small can force the AI into predictable flight paths.
-
-Benchmark variance matters. Seed‑specific performance highlights the need for robustness across starting positions, not just average win rate.
-
-Structural improvements are now necessary. Parameter tuning has reached diminishing returns. The next step must be a targeted counter‑strategy against the coordinated detectives' encirclement tactics
+6. Time Budget is Too Low (QUICK WIN)
+TIME_BUDGET_MS = 800 with only 6 determinizations per rollout at depth 6–12 means MCTS is barely getting enough iterations to converge. If your benchmark allows it, bump to 1500–2000ms. Even within 800ms, you can get more signal by reducing determinizations from 6 to 3 (diminishing returns past 3–4) and using the saved time for more MCTS iterations.
