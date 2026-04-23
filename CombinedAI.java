@@ -144,7 +144,7 @@ this.evaluator = new MoveEvaluator(graphAnalyzer, beliefTracker, surfacePlanner,
             if (heuristicMove != null && !heuristicMove.equals(bestMove)) {
                 double bestScore = evaluator.evaluateMoveWithLookahead(bestMove);
                 double heuristicScore = evaluator.evaluateMoveWithLookahead(heuristicMove);
-                if (heuristicScore > bestScore + 10.0) {
+                if (heuristicScore > bestScore + 40.0) {
                     if (DEBUG) System.out.printf("[PRESSURE_OVERRIDE] Using heuristic move over MCTS: %.2f > %.2f%n",
                         heuristicScore, bestScore);
                     bestMove = heuristicMove;
@@ -369,12 +369,15 @@ this.evaluator = new MoveEvaluator(graphAnalyzer, beliefTracker, surfacePlanner,
         Set<Integer> candidates = beliefTracker.getPossibleLocations();
         int candidateSize = candidates.size();
         int roundsUntilReveal = getRoundsUntilNextReveal(view, round);
-        int ambiguity = evaluator.getCurrentAmbiguity();
 
+        // v7: TIGHTENED — only override in truly desperate situations.
+        // The improved MCTS (sigmoid terminal, cordon-aware rollouts) handles
+        // mid-game pressure better than the noisy 100-term heuristic.
+        // Override only when:
+        //   1. Reveal is imminent (MCTS doesn't model information disclosure well)
+        //   2. Candidate set is tiny (detectives basically know where we are)
         if (roundsUntilReveal <= 1) return true;
-        if (candidateSize <= 12) return true;
-        if (ambiguity <= 15) return true;
-        if (mrXTickets.getOrDefault(Ticket.SECRET, 0) <= 1 && candidateSize <= 18) return true;
+        if (candidateSize <= 5) return true;
         return false;
     }
 
