@@ -844,13 +844,7 @@ public class MoveEvaluator {
                         break;
                     }
                 }
-                if (roundsUntilReveal == 1 && mrXTickets.getOrDefault(Ticket.SECRET, 0) > 0) {
-                    // Massive bonus - using SECRET right before reveal forces detectives to consider
-                    // ALL possible transport types, exploding their candidate set
-                    score += 200.0;
-                    if (DEBUG) debug("[PRE-REVEAL-SECRET] Round %d, 1 before reveal, pressure %.1f%n",
-                        currentRound, candidatePressure);
-                }
+                
             }
             
             // COUNTER-DIVIDING: Aggressive bonus for moves that explode candidate set
@@ -2197,6 +2191,23 @@ public class MoveEvaluator {
         lastSearchRoot = root;
         
         return bestChild.moveFromParent;
+    }
+
+    /**
+     * Returns the top N moves with their MCTS scores from the last search.
+     * Must be called immediately after selectBestMoveWithMCTS.
+     */
+    public List<Map.Entry<Move, Double>> getTopMovesWithScores(int n) {
+        if (lastSearchRoot == null) return Collections.emptyList();
+        return lastSearchRoot.children.stream()
+            .filter(c -> c.moveFromParent != null)
+            .sorted(Comparator.comparingDouble((MCTSNode c) ->
+                finalSelectionScore(c, lastSearchRoot.visits)).reversed())
+            .limit(n)
+            .map(c -> new java.util.AbstractMap.SimpleEntry<>(
+                c.moveFromParent,
+                finalSelectionScore(c, lastSearchRoot.visits)))
+            .collect(Collectors.toList());
     }
 
     public MCTSNode getLastSearchRoot() {
