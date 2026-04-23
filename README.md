@@ -1,21 +1,11 @@
-The v6 changes produced a clear improvement: 20% win rate (4/20) vs. 15% baseline.
-This confirms the cleanup was effective and the MCTS enhancements are beneficial.
-
-📊 Comparison to Previous Versions
-Version	Win Rate	Notes
-v4 (baseline)	15% (3/20)	Fine‑tuned parameters
-v5	10% (2/20)	Harmful bonuses included
-v6	20% (4/20)	Clean MCTS improvements only
-Seed 200042 reached 40% wins – the highest single‑seed performance so far.
-
-Seed 400042 remains a stubborn 0% – certain starting configurations are still extremely difficult.
-
-🔍 What the Numbers Tell Us
-Metric	v4	v6	Change
-Avg capture round	~10–12	~11–15	↑ longer survival
-Avg candidates at reveal	38–68	24–61	similar range
-Interception rate	60–100%	50–80%	↓ slightly better evasion
-Per‑game time	~200s	~500s	↑ due to 1200ms budget
-The increased survival time and reduced interception rate suggest the AI is making better escape decisions, especially in mid‑game.
-
-🛠️ What Next?
+The problem is clear. Let me lay it out:
+The heuristic override is defeating your MCTS improvements. The scoring function has terms ranging from -300 to +200. A threshold of +10 means virtually any disagreement between MCTS and heuristic results in the heuristic winning. And the trigger conditions (candidateSize ≤ 12, ambiguity ≤ 15, roundsUntilReveal ≤ 1) fire in exactly the mid-game moments where captures happen — rounds 7–15. So the improved MCTS (sigmoid terminal, cordon-aware rollouts) is being overridden in exactly the situations it was designed to handle.
+Here's the v7 change — tighten the override to only fire in truly critical moments, and raise the threshold so MCTS is only overridden when the heuristic strongly disagrees:Organized and consolidated three optimized files for user benchmarkingOrganized and consolidated three optimized files for user benchmarkingNow let me package all three v7 files for you:Assessed clean diffs and prepared comprehensive presentationAssessed clean diffs and prepared comprehensive presentationAll diffs are clean and minimal. Here's the complete v7 package:Synthesized performance metrics and validated algorithmic improvementsSynthesized performance metrics and validated algorithmic improvementsv7 — One Change: Unleash MCTS
+This package includes the v6 baseline (sigmoid terminal + cordon-aware rollouts + 1200ms budget) plus one new change in CombinedAI:
+What changed (CombinedAI.java only)
+Tightened heuristic override conditions — previously the override fired when candidateSize ≤ 12, ambiguity ≤ 15, SECRET ≤ 1 with candidateSize ≤ 18, or roundsUntilReveal ≤ 1. Now it only fires for roundsUntilReveal ≤ 1 or candidateSize ≤ 5.
+Raised override threshold from 10 to 40 — so even when the override triggers, MCTS is only overridden when the heuristic strongly disagrees, not on trivial scoring noise.
+Why this should help
+Your heuristic evaluator has ~100 scoring terms with magnitudes up to ±300. With a 10-point threshold, virtually any disagreement between MCTS and the heuristic resulted in the heuristic winning. This was happening in exactly the critical mid-game window (rounds 7–15) where captures concentrate — the v6 MCTS improvements were being bypassed right when they mattered most.
+What to watch in the benchmark
+If this works (win rate ≥ 25%), the next change should be escape corridor depth scoring — a 2-step lookahead that checks whether each destination's exits also have uncontested exits. If it regresses, the fallback is to keep the conditions tightened but lower the threshold to 25 instead of 40 (partial trust in MCTS).
