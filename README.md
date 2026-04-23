@@ -1,11 +1,70 @@
-The problem is clear. Let me lay it out:
-The heuristic override is defeating your MCTS improvements. The scoring function has terms ranging from -300 to +200. A threshold of +10 means virtually any disagreement between MCTS and heuristic results in the heuristic winning. And the trigger conditions (candidateSize ≤ 12, ambiguity ≤ 15, roundsUntilReveal ≤ 1) fire in exactly the mid-game moments where captures happen — rounds 7–15. So the improved MCTS (sigmoid terminal, cordon-aware rollouts) is being overridden in exactly the situations it was designed to handle.
-Here's the v7 change — tighten the override to only fire in truly critical moments, and raise the threshold so MCTS is only overridden when the heuristic strongly disagrees:Organized and consolidated three optimized files for user benchmarkingOrganized and consolidated three optimized files for user benchmarkingNow let me package all three v7 files for you:Assessed clean diffs and prepared comprehensive presentationAssessed clean diffs and prepared comprehensive presentationAll diffs are clean and minimal. Here's the complete v7 package:Synthesized performance metrics and validated algorithmic improvementsSynthesized performance metrics and validated algorithmic improvementsv7 — One Change: Unleash MCTS
-This package includes the v6 baseline (sigmoid terminal + cordon-aware rollouts + 1200ms budget) plus one new change in CombinedAI:
-What changed (CombinedAI.java only)
-Tightened heuristic override conditions — previously the override fired when candidateSize ≤ 12, ambiguity ≤ 15, SECRET ≤ 1 with candidateSize ≤ 18, or roundsUntilReveal ≤ 1. Now it only fires for roundsUntilReveal ≤ 1 or candidateSize ≤ 5.
-Raised override threshold from 10 to 40 — so even when the override triggers, MCTS is only overridden when the heuristic strongly disagrees, not on trivial scoring noise.
-Why this should help
-Your heuristic evaluator has ~100 scoring terms with magnitudes up to ±300. With a 10-point threshold, virtually any disagreement between MCTS and the heuristic resulted in the heuristic winning. This was happening in exactly the critical mid-game window (rounds 7–15) where captures concentrate — the v6 MCTS improvements were being bypassed right when they mattered most.
-What to watch in the benchmark
-If this works (win rate ≥ 25%), the next change should be escape corridor depth scoring — a 2-step lookahead that checks whether each destination's exits also have uncontested exits. If it regresses, the fallback is to keep the conditions tightened but lower the threshold to 25 instead of 40 (partial trust in MCTS).
+=== BENCHMARK RESULTS ===
+Results: 10 games, 10.0% Mr.X wins, avg 10.8 rounds, avg 48.9 candidates at reveal, 3284853ms total (seed=100042)
+
+=== CAPTURE ANALYSIS ===
+Average capture round: 10.8
+Average min distance at capture: 1.3
+Average tickets remaining: 40.8
+
+Capture methods:
+  - surrounded_after_reveal: 2 (22.2%)
+  - cornered: 1 (11.1%)
+  - intercepted: 6 (66.7%)
+
+Total time: 3284991ms
+Avg per game: 328499ms
+Mr X Win Rate: 10.00%
+RESULT runId=2026-04-23_19-04-32 games=10 mrXWins=1 detectiveWins=9 seed=100042 elapsedMs=3284991 rolloutDepth=10 timeBudgetMs=1200
+
+=== BENCHMARK RESULTS ===
+Results: 10 games, 20.0% Mr.X wins, avg 10.6 rounds, avg 37.4 candidates at reveal, 2888551ms total (seed=200042)
+
+=== CAPTURE ANALYSIS ===
+Average capture round: 10.6
+Average min distance at capture: 2.1
+Average tickets remaining: 33.6
+
+Capture methods:
+  - surrounded_after_reveal: 2 (25.0%)
+  - cornered: 1 (12.5%)
+  - intercepted: 5 (62.5%)
+
+Total time: 2888711ms
+Avg per game: 288871ms
+Mr X Win Rate: 20.00%
+RESULT runId=2026-04-23_19-04-32 games=10 mrXWins=2 detectiveWins=8 seed=200042 elapsedMs=2888711 rolloutDepth=10 timeBudgetMs=1200
+
+=== BENCHMARK RESULTS ===
+Results: 10 games, 10.0% Mr.X wins, avg 10.4 rounds, avg 45.7 candidates at reveal, 3278276ms total (seed=300042)
+
+=== CAPTURE ANALYSIS ===
+Average capture round: 10.4
+Average min distance at capture: 1.6
+Average tickets remaining: 39.8
+
+Capture methods:
+  - cornered: 1 (11.1%)
+  - intercepted: 8 (88.9%)
+
+Total time: 3278422ms
+Avg per game: 327842ms
+Mr X Win Rate: 10.00%
+RESULT runId=2026-04-23_19-04-32 games=10 mrXWins=1 detectiveWins=9 seed=300042 elapsedMs=3278422 rolloutDepth=10 timeBudgetMs=1200
+
+=== BENCHMARK RESULTS ===
+Results: 10 games, 0.0% Mr.X wins, avg 8.9 rounds, avg 25.8 candidates at reveal, 2887546ms total (seed=400042)
+
+=== CAPTURE ANALYSIS ===
+Average capture round: 8.9
+Average min distance at capture: 1.2
+Average tickets remaining: 41.7
+
+Capture methods:
+  - surrounded_after_reveal: 2 (20.0%)
+  - cornered: 2 (20.0%)
+  - intercepted: 6 (60.0%)
+
+Total time: 2887718ms
+Avg per game: 288771ms
+Mr X Win Rate: 0.00%
+RESULT runId=2026-04-23_19-04-32 games=10 mrXWins=0 detectiveWins=10 seed=400042 elapsedMs=2887718 rolloutDepth=10 timeBudgetMs=1200
